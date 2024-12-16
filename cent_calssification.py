@@ -17,14 +17,29 @@ import pytorch_lightning as pl
 from nicheformer.data.datamodules import MerlinDataModuleDistributed
 from nicheformer.models._fine_tune_model import FineTuningModel
 import argparse
+import torch.distributed as dist
+import pdb
 
 parser = argparse.ArgumentParser(description='Fine-tune Nicheformer model')
 parser.add_argument("--dataset_name", type=str, help="Dataset name")
-parser.add_argument("--data_path", type=str, help="Path to data directory")
-parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint file")
+parser.add_argument("--data_path", type=str, help="Path to data directory", default="data")
+parser.add_argument("--checkpoint_path", type=str, help="Path to checkpoint file", default="nicheformer.ckpt")
 parser.add_argument("--cell_key", type=str, help="Cell type key", default="Celltype")
 parser.add_argument("--batch_key", type=str, help="Batch key", default="batch")
 
+
+# Set environment variables for distributed training 
+os.environ['RANK'] = '0' 
+os.environ['WORLD_SIZE'] = '1'
+os.environ['MASTER_ADDR'] = 'localhost' 
+os.environ['MASTER_PORT'] = '12355'
+# Initialize the process group
+dist.init_process_group(backend="nccl", init_method="env://") 
+# Make sure the process group is initialized 
+if dist.is_initialized(): 
+    print("Process group initialized successfully.") 
+else: 
+    raise RuntimeError("Failed to initialize the process group.")
 
 # Dictionary mappings
 modality_dict = {'dissociated': 3}
@@ -147,7 +162,7 @@ def tokenize(adata, mean_values, file_path, filename):
     for batch in tqdm(range(N_BATCHES)):
         obs_tokens = obs_data.iloc[batch * chunk_len:chunk_len * (batch + 1)].copy()
         tokenized = tokenize_data(adata.X[batch * chunk_len:chunk_len * (batch + 1)], mean_values, 4096)
-
+        labels = obs_tokens['cell_type_idx'].astype(str).astype(int)
         obs_tokens = obs_tokens[['assay', 'specie', 'modality', 'idx']]
         # Concatenate dataframes
         obs_tokens['X'] = [tokenized[i, :] for i in range(tokenized.shape[0])]
@@ -161,6 +176,8 @@ def tokenize(adata, mean_values, file_path, filename):
                 print(f"Column '{col}' is not serializable: {e}")
         obs_tokens['assay'] = obs_tokens['assay'].astype('int')
         obs_tokens['specie'] = obs_tokens['specie'].astype('int')
+        obs_tokens['cell_type'] = labels
+        # pdb.set_trace()
         for col in obs_tokens.columns:
             try:
                 pyarrow.Table.from_pandas(obs_tokens[[col]])
@@ -438,7 +455,7 @@ def finetune(ds_path, checkpoint_path):
 
     module = MerlinDataModuleDistributed(
         path=ds_path,
-        columns=['assay', 'specie', 'modality', 'idx', 'X'],
+        columns=['assay', 'specie', 'modality', 'idx', 'X', 'cell_type'],
         batch_size=config['batch_size'],
         world_size=1,
         splits=True
@@ -451,4 +468,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     # You can skip the prep step if you have already tokenized the data
     # prep(args.dataset_name, args.data_path)
-    finetune(f"{args.data_path}/{args.dataset_name}", args.checkpoint_path)
+    try:
+        finetune(f"{args.data_path}/{args.dataset_name}", args.checkpoint_path)
+    finally:
+        if dist.is_initialized(): 
+            dist.destroy_process_group()

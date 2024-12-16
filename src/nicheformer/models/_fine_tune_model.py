@@ -10,6 +10,8 @@ from pyro.distributions import DirichletMultinomial
 import gc
 import numpy as np
 
+import pdb
+
 CLS_TOKEN = 2
 
 class FineTuningModel(pl.LightningModule):
@@ -121,7 +123,9 @@ class FineTuningModel(pl.LightningModule):
         for i in range(len(self.backbone.encoder.layers)):
             layer = self.backbone.encoder.layers[i]
             embeddings = layer(embeddings, is_causal=self.backbone.autoregressive, src_key_padding_mask=attention_mask) # bs x seq_len x dim
-            if i in self.hparams.extract_layers:
+            # pdb.set_trace()
+            # if i in self.hparams.extract_layers: #AOC
+            if i - len(self.backbone.encoder.layers) == self.hparams.extract_layers:
                 hidden_repr.append(embeddings)
 
         if self.hparams.function_layers == "mean":
@@ -157,8 +161,9 @@ class FineTuningModel(pl.LightningModule):
         if self.hparams.regress_distribution:
             cls_prediction = self.softmax(cls_prediction)
                 
-            return {'cls_prediction': cls_prediction,
-                    'representation': transformer_output[:, 3:, :].mean(1)}
+        return {'cls_prediction': cls_prediction, #AOC
+                'representation': transformer_output[:, 3:, :].mean(1)}
+        
             
     
     def training_step(self, batch, batch_idx, *args, **kwargs):
@@ -203,7 +208,10 @@ class FineTuningModel(pl.LightningModule):
                 
             if self.hparams.supervised_task == 'niche_classification':
                 label = label.view(-1, 1) # reshape needed
-                
+
+            if self.hparams.supervised_task == 'niche_multiclass_classification': #AOC
+                cls_prediction = cls_prediction.squeeze(-1)
+            
             loss = self.cls_loss(cls_prediction, label.long())
             self.log('fine_tuning_classification_train', loss, sync_dist=True)
             
@@ -249,7 +257,11 @@ class FineTuningModel(pl.LightningModule):
                 
             if self.hparams.supervised_task == 'niche_classification':
                 label = label.view(-1, 1) # N x K
+            
+            if self.hparams.supervised_task == 'niche_multiclass_classification': #AOC
+                cls_prediction = cls_prediction.squeeze(-1)
 
+            # pdb.set_trace()
             loss = self.cls_loss(cls_prediction, label.long())
             self.log('fine_tuning_classification_validation', loss, sync_dist=True)
             accuracy_pred = torch.argmax(cls_prediction, dim=1)

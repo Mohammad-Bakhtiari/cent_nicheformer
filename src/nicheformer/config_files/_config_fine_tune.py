@@ -36,7 +36,7 @@ hp_config = {
     'ignore_zeros': False,  # Include zero labels in classification
     'baseline': False,  # Indicates a trained Transformer, not baseline
     'organ': 'pancreas',  # Dataset-specific information for logging
-    'label': 'cell_type_idx',  # Target label column
+    'label': 'cell_type',  # Target label column
     'extract_layers': -1,  # Use the last hidden layer for linear head
     'function_layers': 'mean',  # Function to combine hidden layers
     'predict': False,  # Default behavior (adjust based on use-case)
